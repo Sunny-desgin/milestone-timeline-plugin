@@ -4,8 +4,9 @@ import MilestoneTimeline from '@/pages/HomePage/MilestoneTimeline';
 import TimelineConfig from '@/pages/HomePage/TimelineConfig';
 import {
   getSavedConfig,
-  IS_CONFIG_MODE,
+  isConfigMode,
   IS_DASHBOARD_HOST,
+  markRendered,
   saveTimelineConfig,
 } from '@/lib/dashboard';
 import {
@@ -21,9 +22,11 @@ import './timeline.css';
 export default function HomePage() {
   const [today, setToday] = useState(0);
   const [config, setConfig] = useState<IPluginConfig>(EMPTY_CONFIG);
+  const [configMode, setConfigMode] = useState(isConfigMode);
   const [loading, setLoading] = useState(IS_DASHBOARD_HOST);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
+  const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -43,18 +46,25 @@ export default function HomePage() {
 
     async function initialize() {
       try {
+        // 创建状态下 getConfig 会被宿主拒绝，getSavedConfig 内部已兜底返回 null
         const savedConfig = await getSavedConfig();
         if (!active) return;
+
+        const editable = isConfigMode();
         if (savedConfig) {
           setConfig(savedConfig);
-        } else if (IS_CONFIG_MODE) {
+        } else if (editable) {
           setConfig({ ...EMPTY_CONFIG, nodes: [createEmptyNode()] });
+        }
+        setConfigMode(editable);
+        if (editable && !savedConfig) {
+          setNotice('首次添加组件，请先配置节点并点击「发布」，配置才会保存到该组件。');
         }
       } catch (cause) {
         if (active) setError(`插件初始化失败：${String(cause)}`);
       } finally {
         if (active) setLoading(false);
-        await dashboard.setRendered();
+        void markRendered();
       }
     }
 
@@ -63,7 +73,7 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    if (!IS_DASHBOARD_HOST || IS_CONFIG_MODE) return;
+    if (!IS_DASHBOARD_HOST || configMode) return;
     let active = true;
     const unsubscribe = dashboard.onConfigChange(async () => {
       try {
@@ -77,11 +87,12 @@ export default function HomePage() {
       active = false;
       unsubscribe();
     };
-  }, []);
+  }, [configMode]);
 
   function updateConfig(nextConfig: IPluginConfig) {
     setConfig(nextConfig);
     setSaveMessage('');
+    setNotice('');
     setError('');
   }
 
@@ -107,9 +118,15 @@ export default function HomePage() {
       setError('');
       setSaveMessage('');
       await saveTimelineConfig(config);
+      setNotice('');
       setSaveMessage('已发布到当前仪表盘');
     } catch (cause) {
-      setError(`发布失败：${String(cause)}`);
+      const raw = String(cause);
+      setError(
+        raw.includes('creation status')
+          ? '发布失败：组件还没完成添加。请先在仪表盘里确认添加该组件，进入配置状态后再点「发布」。'
+          : `发布失败：${raw}`,
+      );
     } finally {
       setSaving(false);
     }
@@ -123,6 +140,7 @@ export default function HomePage() {
     <main className="plugin-page" style={{ backgroundColor: config.appearance.backgroundColor }}>
       <div className="timeline-main">
         {error && <div className="error-banner" role="alert">{error}</div>}
+        {!error && notice && <div className="notice-banner" role="status">{notice}</div>}
         <MilestoneTimeline
           milestones={milestones}
           today={today}
@@ -131,7 +149,7 @@ export default function HomePage() {
           appearance={config.appearance}
         />
       </div>
-      {IS_CONFIG_MODE && (
+      {configMode && (
         <TimelineConfig
           config={config}
           saving={saving}

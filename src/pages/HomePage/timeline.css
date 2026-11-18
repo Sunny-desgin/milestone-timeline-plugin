@@ -426,6 +426,16 @@ body,
   font-size: 12px;
 }
 
+.notice-banner {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted-foreground);
+  background: var(--accent);
+  font-size: 12px;
+}
+
 .spin { animation: timeline-spin 1s linear infinite; }
 @keyframes timeline-spin { to { transform: rotate(360deg); } }
 

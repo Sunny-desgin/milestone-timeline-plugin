@@ -4,8 +4,43 @@ import { TRANSPARENT_COLOR } from '@/lib/milestone-icons';
 import type { IAppearance, IPluginConfig } from '@/lib/timeline';
 
 export const IS_DASHBOARD_HOST = window.self !== window.top;
-export const IS_CONFIG_MODE = IS_DASHBOARD_HOST &&
-  (dashboard.state === DashboardState.Create || dashboard.state === DashboardState.Config);
+
+/**
+ * 宿主注入的仪表盘状态。首帧可能还没就绪（undefined），
+ * 所以所有判断都必须放在调用时读取，不能缓存成模块常量。
+ */
+export function readDashboardState(): DashboardState | undefined {
+  if (!IS_DASHBOARD_HOST) return undefined;
+  return (dashboard as { state?: DashboardState }).state;
+}
+
+/**
+ * 创建状态（Create）和配置状态（Config）都需要展示配置面板。
+ * 状态未就绪时按配置状态处理，避免进入展示态却没有配置入口。
+ */
+export function isConfigMode(): boolean {
+  const state = readDashboardState();
+  if (state === undefined || state === null) return true;
+  return state === DashboardState.Create || state === DashboardState.Config;
+}
+
+/** 展示状态：View / FullScreen */
+export function isViewMode(): boolean {
+  const state = readDashboardState();
+  return state === DashboardState.View || state === DashboardState.FullScreen;
+}
+
+/**
+ * 通知宿主已渲染完成。创建状态下宿主可能拒绝该调用，
+ * 属于正常现象，忽略即可，不影响插件使用。
+ */
+export async function markRendered(): Promise<void> {
+  try {
+    await dashboard.setRendered();
+  } catch {
+    // 创建状态或宿主未就绪时会被拒绝，忽略
+  }
+}
 
 function normalizeColor(value: unknown, fallback: string, allowTransparent = true) {
   if (typeof value !== 'string') return fallback;
@@ -25,9 +60,21 @@ function normalizeAppearance(value: unknown): IAppearance {
   };
 }
 
+/**
+ * 读取已保存的配置。
+ * 创建状态下宿主禁止调用 getConfig，此时直接返回 null；
+ * 状态未知时若读取被拒，同样按“暂无配置”处理，不阻断插件渲染。
+ */
 export async function getSavedConfig(): Promise<IPluginConfig | null> {
-  if (dashboard.state === DashboardState.Create) return null;
-  const saved = await dashboard.getConfig();
+  if (readDashboardState() === DashboardState.Create) return null;
+
+  let saved: Awaited<ReturnType<typeof dashboard.getConfig>>;
+  try {
+    saved = await dashboard.getConfig();
+  } catch {
+    return null;
+  }
+
   const value = saved.customConfig?.timeline;
   if (!value || typeof value !== 'object') return null;
 
